@@ -1,14 +1,7 @@
-//
-//  OpenAIConfigurationStore.swift
-//  OneScene
-//
-//  Created by Codex on 2026/04/22.
-//
-
 import Foundation
 
 struct OpenAIConfiguration {
-    static let defaultModelID = "gpt-4.1-mini"
+    static let defaultModelID = "gpt-5.4"
     static let secretsFilename = "OpenAISecrets.plist"
 
     let apiKey: String

@@ -1,10 +1,3 @@
-//
-//  CaptureReviewScreen.swift
-//  OneScene
-//
-//  Created by Codex on 2026/04/22.
-//
-
 import SwiftUI
 
 struct CaptureReviewScreen: View {

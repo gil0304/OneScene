@@ -1,10 +1,3 @@
-//
-//  PosterPersistenceStore.swift
-//  OneScene
-//
-//  Created by Codex on 2026/04/22.
-//
-
 import Foundation
 import Photos
 import UIKit
