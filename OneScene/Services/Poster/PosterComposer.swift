@@ -30,6 +30,34 @@ private struct PosterArtworkView: View {
         aspectRatio > 1.02
     }
 
+    private var sanitizedTitle: String {
+        story.title
+            .replacingOccurrences(of: "\n", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var titleCharacterCount: Int {
+        sanitizedTitle
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "　", with: "")
+            .count
+    }
+
+    private var titleFontSize: CGFloat {
+        let baseSize: CGFloat = isLandscape ? 110 : 134
+
+        switch titleCharacterCount {
+        case ...8:
+            return baseSize
+        case 9...10:
+            return baseSize - 10
+        case 11...12:
+            return baseSize - 20
+        default:
+            return baseSize - 30
+        }
+    }
+
     var body: some View {
         GeometryReader { proxy in
             ZStack {
@@ -148,13 +176,12 @@ private struct PosterArtworkView: View {
                 .frame(height: isLandscape ? 86 : 104)
 
             VStack(spacing: 22) {
-                Text(story.title)
-                    .font(.system(size: isLandscape ? 116 : 140, weight: .heavy, design: .serif))
-                    .lineSpacing(isLandscape ? 18 : 20)
+                Text(sanitizedTitle)
+                    .font(.system(size: titleFontSize, weight: .heavy, design: .serif))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(Color.white.opacity(0.97))
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(3)
+                    .minimumScaleFactor(0.58)
+                    .lineLimit(1)
                     .shadow(color: story.genre.posterGlow.opacity(0.82), radius: 22)
                     .shadow(color: Color.white.opacity(0.25), radius: 6)
 
@@ -164,7 +191,7 @@ private struct PosterArtworkView: View {
                     .foregroundStyle(Color.white.opacity(0.9))
                     .shadow(color: story.genre.posterGlow.opacity(0.64), radius: 14)
             }
-            .frame(maxWidth: isLandscape ? 820 : 860)
+            .frame(maxWidth: isLandscape ? 860 : 900)
 
             Spacer()
 

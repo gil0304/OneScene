@@ -134,6 +134,8 @@ private struct ResponsesRequest: Encodable {
                             Analyze the user's photo and create a Japanese movie-poster concept.
                             Return only valid JSON that matches the provided schema exactly.
                             The title must feel original and cinematic, written in Japanese.
+                            The title will be rendered as a single headline line on the poster, so keep it compact and visually strong.
+                            Aim for roughly 6 to 10 Japanese characters, and avoid long subtitles, punctuation-heavy phrasing, or two-part titles.
                             The tagline must be a single Japanese sentence that is evocative but readable.
                             The genre must be exactly one item from the allowed list.
                             Do not mention AI, apps, cameras, JSON, schemas, or safety policies.
@@ -149,7 +151,8 @@ private struct ResponsesRequest: Encodable {
                             この写真を見て、映画ポスター用のタイトル、キャッチコピー、ジャンルを生成してください。
                             ジャンル候補は次の8つのみです。
                             青春、恋愛、サスペンス、SF、ホラー、ヒューマンドラマ、ロードムービー、ファンタジー
-                            タイトルは短すぎず、ありきたりすぎない日本語にしてください。
+                            タイトルはポスター上で1行見出しとして載せるので、6文字から10文字前後の日本語にしてください。
+                            長い副題、記号の多用、二部構成のタイトルは避けてください。
                             キャッチコピーは1文で、日常の一瞬が映画になる感じを大切にしてください。
                             """
                         ),
