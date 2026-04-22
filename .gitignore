@@ -1,0 +1,6 @@
+.DS_Store
+xcuserdata/
+*.xcuserstate
+
+# Local secrets for OpenAI
+OneScene/Configuration/Secrets/OpenAISecrets.plist

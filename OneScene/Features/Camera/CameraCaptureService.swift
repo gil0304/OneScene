@@ -6,6 +6,7 @@
 //
 
 @preconcurrency import AVFoundation
+import Foundation
 import SwiftUI
 import UIKit
 
@@ -16,15 +17,44 @@ final class CameraCaptureService: NSObject {
     var onImageCaptured: ((UIImage) -> Void)?
     var onError: ((String) -> Void)?
     var onPositionChanged: ((CameraLens) -> Void)?
+    var onZoomStateChanged: ((CGFloat, ClosedRange<CGFloat>) -> Void)?
 
     private let sessionQueue = DispatchQueue(label: "app.onescene.camera.session")
     private let photoOutput = AVCapturePhotoOutput()
     private var currentInput: AVCaptureDeviceInput?
     private var captureDelegates: [Int64: PhotoCaptureDelegate] = [:]
     private var isConfigured = false
+    private let maximumUserZoomFactor: CGFloat = 5
+    private let minimumBackCameraDisplayZoomFactor: CGFloat = 0.5
+    private let minimumFrontCameraDisplayZoomFactor: CGFloat = 1
+    private var lastKnownVideoOrientation: AVCaptureVideoOrientation = .portrait
+    private var orientationObserver: NSObjectProtocol?
     private(set) var currentLens: CameraLens = .back
+    private(set) var currentZoomFactor: CGFloat = 1
+    private(set) var zoomRange: ClosedRange<CGFloat> = 1...1
+
+    override init() {
+        super.init()
+
+        orientationObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.orientationDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateLastKnownVideoOrientation()
+        }
+    }
+
+    deinit {
+        if let orientationObserver {
+            NotificationCenter.default.removeObserver(orientationObserver)
+        }
+    }
 
     func prepare() {
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        updateLastKnownVideoOrientation()
+
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         DispatchQueue.main.async {
             self.onAuthorizationChanged?(status)
@@ -67,7 +97,15 @@ final class CameraCaptureService: NSObject {
 
     func switchCamera() {
         let nextLens: CameraLens = currentLens == .back ? .front : .back
+        currentZoomFactor = 1
         configureSession(for: nextLens)
+    }
+
+    func setZoomFactor(_ factor: CGFloat) {
+        sessionQueue.async {
+            guard let device = self.currentInput?.device else { return }
+            self.applyZoomFactor(factor, to: device)
+        }
     }
 
     func capturePhoto() {
@@ -79,6 +117,11 @@ final class CameraCaptureService: NSObject {
 
             let settings = AVCapturePhotoSettings()
             settings.photoQualityPrioritization = .quality
+
+            if let photoConnection = self.photoOutput.connection(with: .video),
+               photoConnection.isVideoOrientationSupported {
+                photoConnection.videoOrientation = self.lastKnownVideoOrientation
+            }
 
             let delegate = PhotoCaptureDelegate { [weak self] result in
                 guard let self else { return }
@@ -114,7 +157,7 @@ final class CameraCaptureService: NSObject {
 
     private func configureSession(for lens: CameraLens) {
         sessionQueue.async {
-            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: lens.devicePosition) else {
+            guard let device = self.preferredCaptureDevice(for: lens) else {
                 self.emitError("利用できるカメラが見つかりません")
                 return
             }
@@ -153,9 +196,12 @@ final class CameraCaptureService: NSObject {
 
                 self.isConfigured = true
                 self.currentLens = lens
+                self.applyZoomFactor(self.currentZoomFactor, to: device)
+
                 DispatchQueue.main.async {
                     self.onPositionChanged?(lens)
                 }
+
                 self.startRunning()
             } catch {
                 self.emitError("カメラの初期化に失敗しました")
@@ -166,6 +212,93 @@ final class CameraCaptureService: NSObject {
     private func emitError(_ message: String) {
         DispatchQueue.main.async {
             self.onError?(message)
+        }
+    }
+
+    private func applyZoomFactor(_ factor: CGFloat, to device: AVCaptureDevice) {
+        let multiplier = max(device.displayVideoZoomFactorMultiplier, 0.0001)
+        let requestedMinimumDisplayZoom = device.position == .back
+            ? minimumBackCameraDisplayZoomFactor
+            : minimumFrontCameraDisplayZoomFactor
+
+        let minimumDisplayZoom = max(device.minAvailableVideoZoomFactor * multiplier, requestedMinimumDisplayZoom)
+        let maximumDisplayZoom = max(
+            min(device.maxAvailableVideoZoomFactor * multiplier, maximumUserZoomFactor),
+            minimumDisplayZoom
+        )
+        let clampedDisplayZoom = min(max(factor, minimumDisplayZoom), maximumDisplayZoom)
+        let clampedDeviceZoom = clampedDisplayZoom / multiplier
+
+        do {
+            try device.lockForConfiguration()
+            device.videoZoomFactor = clampedDeviceZoom
+            device.unlockForConfiguration()
+
+            currentZoomFactor = clampedDisplayZoom
+            zoomRange = minimumDisplayZoom...maximumDisplayZoom
+
+            DispatchQueue.main.async {
+                self.onZoomStateChanged?(clampedDisplayZoom, minimumDisplayZoom...maximumDisplayZoom)
+            }
+        } catch {
+            emitError("ズームの調整に失敗しました")
+        }
+    }
+
+    private func preferredCaptureDevice(for lens: CameraLens) -> AVCaptureDevice? {
+        let deviceTypes: [AVCaptureDevice.DeviceType]
+
+        switch lens {
+        case .back:
+            deviceTypes = [
+                .builtInTripleCamera,
+                .builtInDualWideCamera,
+                .builtInDualCamera,
+                .builtInWideAngleCamera,
+                .builtInUltraWideCamera
+            ]
+        case .front:
+            deviceTypes = [
+                .builtInTrueDepthCamera,
+                .builtInWideAngleCamera
+            ]
+        }
+
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: deviceTypes,
+            mediaType: .video,
+            position: lens.devicePosition
+        )
+
+        for deviceType in deviceTypes {
+            if let device = discoverySession.devices.first(where: { $0.deviceType == deviceType }) {
+                return device
+            }
+        }
+
+        return discoverySession.devices.first
+    }
+
+    private func updateLastKnownVideoOrientation() {
+        guard let resolvedOrientation = Self.resolveVideoOrientation(from: UIDevice.current.orientation) else {
+            return
+        }
+
+        lastKnownVideoOrientation = resolvedOrientation
+    }
+
+    private static func resolveVideoOrientation(from deviceOrientation: UIDeviceOrientation) -> AVCaptureVideoOrientation? {
+        switch deviceOrientation {
+        case .portrait:
+            return .portrait
+        case .portraitUpsideDown:
+            return .portraitUpsideDown
+        case .landscapeLeft:
+            return .landscapeRight
+        case .landscapeRight:
+            return .landscapeLeft
+        default:
+            return nil
         }
     }
 }
@@ -189,7 +322,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
             return
         }
 
-        completion(.success(image))
+        completion(.success(image.normalizedOrientationImage()))
     }
 }
 
@@ -200,11 +333,22 @@ struct CameraPreviewView: UIViewRepresentable {
         let view = PreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+
+        if let connection = view.previewLayer.connection,
+           connection.isVideoOrientationSupported {
+            connection.videoOrientation = .portrait
+        }
+
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         uiView.previewLayer.session = session
+
+        if let connection = uiView.previewLayer.connection,
+           connection.isVideoOrientationSupported {
+            connection.videoOrientation = .portrait
+        }
     }
 }
 
